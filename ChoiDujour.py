@@ -34,6 +34,7 @@ def find_tool(name):
     sys.exit('Required tool ' + name + ' is missing!')
 
 hactool = find_tool('hactool')
+linkle = find_tool('linkle')
 kip1decomp = find_tool('kip1decomp')
 seven7a = find_tool('7za')
 
@@ -214,6 +215,20 @@ hacargs += ['--keyset=' + hackeyspath]
 
 def call_hactool(moreArgs):
     totalArgs = [hactool] + hacargs + moreArgs
+    pipes = subprocess.Popen(totalArgs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    std_out, std_err = pipes.communicate()
+
+    if pipes.returncode != 0:
+        err_msg = "%s. Code: %s" % (std_err.strip(), pipes.returncode)
+        raise Exception(err_msg)
+
+    elif len(std_err):
+        raise Exception(std_err)
+
+    return std_out
+
+def call_linkle(ty, moreArgs):
+    totalArgs = [linkle, ty] + hacargs + moreArgs
     pipes = subprocess.Popen(totalArgs, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     std_out, std_err = pipes.communicate()
 
@@ -596,6 +611,20 @@ try:
     print('Using TitleID ' + safePkg.titleId + ' for SAFE firmware package')
     safePkg.load(tempDirName, versionPlatform.lower())
 
+    keys = call_linkle("keygen", [])
+    keyblobs = []
+    for key in keys.split("\n"):
+        if key.startswith("encrypted_keyblob_"):
+            keyblobs.append(key.split(" = ")[1])
+
+    for i in range(len(keyblobs), 32):
+        keyblobs.append("00" * 0xB0)
+
+    keyblobs_arr = bytearray()
+    for keyblob in keyblobs:
+        keyblobs_arr += bytearray.fromhex(keyblob)
+        keyblobs_arr += "\0" * 0x150
+
     boot0 = bytearray()
     boot0 += normalPkg.bctBytes
     boot0 += safePkg.bctBytes
@@ -604,7 +633,9 @@ try:
     boot0 += "\0" * 0xF0000
     boot0 += normalPkg.pkg1Bytes
     boot0 += normalPkg.pkg1Bytes
-    assert len(boot0) == 0x180000
+    boot0 += keyblobs_arr
+    boot0 += "\0" * 0x200
+    assert len(boot0) == 0x184200
 
     boot1 = bytearray()
     boot1 += safePkg.pkg1Bytes
